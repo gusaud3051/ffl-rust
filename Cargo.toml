@@ -2,8 +2,15 @@
 name = "ffl-rust"
 version = "0.1.0"
 edition = "2024"
+default-run = "ffl_formulae-to-sixel"
+build = "build.rs"
+
+[lib]
+name = "ffl_rust"
+path = "src/lib.rs"
 
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
 image = "0.25"
 sixel-rs = "0.5.0"
 
@@ -12,3 +19,13 @@ bindgen = "0.72.0"
 cmake = "0.1.54"
 cc = "1.2.30"
 pkg-config = "0.3.32"
+
+
+[[bin]]
+name = "ffl_formulae-to-sixel"
+path = "src/main.rs"
+
+# Your second binary
+[[bin]]
+name = "latex2sixel"
+path = "src/bin/latex_to_sixel.rs"

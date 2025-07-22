@@ -1,6 +1,4 @@
-mod microtex;
-
-use microtex::wrapper::MicroTeX;
+use ffl_rust::MicroTeX;
 use image::{RgbImage, Rgb};
 use sixel_rs::{
     optflags::DiffusionMethod,
