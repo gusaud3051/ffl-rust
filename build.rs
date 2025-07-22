@@ -32,8 +32,10 @@ fn main() {
         .include("ext/MicroTeX/src")
         .include(&format!("{}/include", dst.display()))
         .flag("-std=c++17")
-        .define("BUILD_GTK", None)  // Enable Cairo graphics backend
-        .define("HAVE_LOG", None)   // Enable logging for debugging
+        .flag("-Wno-unused-parameter")  // Suppress unused parameter warnings from MicroTeX
+        .flag("-Wno-reorder")          // Suppress initialization order warnings from MicroTeX
+        .define("BUILD_GTK", None)      // Enable Cairo graphics backend
+        .define("HAVE_LOG", None)       // Enable logging for debugging
         .object(&format!("{}/build/libLaTeX.a", dst.display())); // Link LaTeX lib directly
     
     // Add cairo include paths

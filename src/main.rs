@@ -1,7 +1,12 @@
 mod microtex;
 
 use microtex::wrapper::MicroTeX;
-use image::{RgbaImage, Rgba};
+use image::{RgbImage, Rgb};
+use sixel_rs::{
+    optflags::DiffusionMethod,
+    pixelformat::PixelFormat,
+    sixel_string,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize MicroTeX with the resource path
@@ -46,36 +51,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Dimensions: {}x{}, baseline: {}", render_width, render_height, baseline);
         
         // Create an image buffer
-        let mut img = RgbaImage::from_pixel(
+        let mut img = RgbImage::from_pixel(
             render_width as u32,
             render_height as u32,
-            Rgba([255, 255, 255, 255]) // White background
+            Rgb([255, 255, 255]) // White background
         );
         
-        // Render to the buffer
-        let mut buffer = img.as_mut().to_vec();
-        renderer.draw_to_buffer(&mut buffer, render_width, render_height, 0, 0)?;
+        // Create a temporary ARGB buffer for Cairo rendering with white background
+        let mut argb_buffer = vec![0u8; (render_width * render_height * 4) as usize];
+        // Initialize with white background (ARGB format)
+        for i in (0..argb_buffer.len()).step_by(4) {
+            argb_buffer[i] = 255;     // B
+            argb_buffer[i + 1] = 255; // G  
+            argb_buffer[i + 2] = 255; // R
+            argb_buffer[i + 3] = 255; // A
+        }
+        renderer.draw_to_buffer(&mut argb_buffer, render_width, render_height, 0, 0)?;
         
-        // Convert buffer back to image (ARGB -> RGBA conversion)
+        // Convert buffer back to image (ARGB -> RGB conversion, dropping alpha)
         for y in 0..render_height as u32 {
             for x in 0..render_width as u32 {
                 let idx = ((y * render_width as u32 + x) * 4) as usize;
-                // Cairo uses ARGB format, we need RGBA
-                let a = buffer[idx + 3];
-                let r = buffer[idx + 2];
-                let g = buffer[idx + 1];
-                let b = buffer[idx];
-                img.put_pixel(x, y, Rgba([r, g, b, a]));
+                // Cairo uses ARGB format, we need RGB (drop alpha)
+                let r = argb_buffer[idx + 2];
+                let g = argb_buffer[idx + 1];
+                let b = argb_buffer[idx];
+                img.put_pixel(x, y, Rgb([r, g, b]));
             }
         }
         
-        // Save as PNG for verification
-        let png_path = format!("formula_{}.png", i + 1);
-        img.save(&png_path)?;
-        println!("Saved PNG to: {}", png_path);
+        // Get dimensions and convert to raw bytes for sixel
+        let (width, height) = img.dimensions();
+        let bytes: Vec<u8> = img
+            .pixels()
+            .flat_map(|pixel| pixel.0.to_vec())
+            .collect();
+        
+        // Generate sixel output
+        match sixel_string(
+            &bytes,
+            width as i32,
+            height as i32,
+            PixelFormat::RGB888,
+            DiffusionMethod::Atkinson,
+        ) {
+            Ok(sixel_output) => {
+                println!("Sixel output:");
+                println!("{}", sixel_output);
+            }
+            Err(e) => {
+                eprintln!("Failed to generate sixel: {:?}", e);
+            }
+        }
     }
     
     println!("\nMicroTeX binding test completed successfully!");
-    println!("Generated PNG files can be viewed to verify LaTeX rendering is working.");
+    println!("LaTeX formulas rendered and displayed as SIXEL graphics.");
     Ok(())
 }

@@ -9,16 +9,22 @@
 #include <cairomm/context.h>
 #include <cairomm/surface.h>
 #include <string>
-#include <codecvt>
-#include <locale>
+#include <cstdlib>
 #include <memory>
 
 using namespace tex;
 
 // Helper to convert UTF-8 to wide string
 static std::wstring utf8_to_wstring(const std::string& utf8) {
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-    return converter.from_bytes(utf8);
+    // Use mbstowcs as a replacement for deprecated wstring_convert
+    size_t len = utf8.length() + 1;
+    std::wstring wstr(len, L'\0');
+    size_t converted = mbstowcs(&wstr[0], utf8.c_str(), len);
+    if (converted == static_cast<size_t>(-1)) {
+        return L""; // Conversion failed
+    }
+    wstr.resize(converted);
+    return wstr;
 }
 
 extern "C" {
