@@ -1,0 +1,165 @@
+#!/bin/sh
+
+# ==============================================================================
+# fzf Advanced Preview Script
+#
+# A POSIX-compliant shell script for fzf to provide rich file previews.
+# This script uses a self-calling mechanism for maximum portability.
+#
+# Features:
+# - Renders images using Kitty's native protocol or Sixel graphics via chafa.
+# - Renders Markdown files using `glow`.
+# - Dynamically compiles and previews LaTeX fragments into high-quality PNGs.
+# - Provides syntax-highlighted previews for text files using `bat`.
+# - Gracefully falls back to `file` for unsupported types.
+#
+# Dependencies:
+# - fzf: The command-line fuzzy finder.
+# - fd-find (fd): A fast and user-friendly alternative to `find`.
+# - bat: A `cat` clone with syntax highlighting.
+# - glow: A terminal-based Markdown reader.
+# - chafa: For rendering all image previews.
+# - TeX Live: For compiling LaTeX fragments (`pdflatex`).
+# - poppler-utils: For converting PDFs to PNG images (`pdftocairo`).
+# ==============================================================================
+
+# --- Main Preview Function ---
+# This shell function contains all the preview logic.
+# It's called by the script itself when in "preview mode".
+fzf_preview_main() {
+  local filepath="$1"
+
+  # --- Pre-flight Check ---
+  if ! [ -r "$filepath" ]; then
+    echo "Error: Cannot read file."
+    echo "Path: $filepath"
+    echo "(File may not exist or you may lack permissions)"
+
+    return 1
+  fi
+
+  # --- Helper: LaTeX Renderer ---
+  render_latex() {
+    local latex_code="$1"
+    local tmp_file="/tmp/fzf_latex_preview_$$"
+
+    cat >"${tmp_file}.tex" <<-EOF
+\\documentclass[preview,border=2pt,varwidth]{standalone}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{graphicx}
+\\usepackage{xcolor}
+\\begin{document}
+\\pagenumbering{gobble}
+${latex_code}
+\\end{document}
+EOF
+
+    pdflatex -output-directory=/tmp -interaction=batchmode "${tmp_file}.tex" >/dev/null 2>&1
+
+    if [ -f "${tmp_file}.pdf" ]; then
+      pdftocairo -png -singlefile -scale-to-x -1 -scale-to-y 1024 "${tmp_file}.pdf" "${tmp_file}"
+      display_image "${tmp_file}.png"
+    fi
+  }
+
+  # --- Helper: Image Displayer ---
+  display_image() {
+    local image_path="$1"
+
+    if [ -n "$KITTY_WINDOW_ID" ]; then
+      kitty +icat --align=left --place="${FZF_PREVIEW_COLUMNS}x${FZF_PREVIEW_LINES}@${FZF_PREVIEW_LEFT}x${FZF_PREVIEW_TOP}" <"${image_path}"
+    elif command -v chafa >/dev/null; then
+      chafa -f sixels -s "${FZF_PREVIEW_COLUMNS}x${FZF_PREVIEW_LINES}" "${image_path}"
+    else
+      echo "Image preview requires kitty or chafa to be installed."
+    fi
+  }
+
+  # --- Logic: Determine Preview Type ---
+  local extension="${filepath##*.}"
+
+  if [ "$extension" = "md" ]; then
+    glow -s dark -w "$FZF_PREVIEW_COLUMNS" "$filepath"
+    local latex_content
+    latex_content=$(awk '/^```latex/{flag=1; next} /^```/{flag=0} flag' "$filepath")
+
+    if [ -n "$latex_content" ]; then
+      echo
+      echo "--- LaTeX Preview ---"
+      echo
+      render_latex "$latex_content"
+    fi
+
+  else
+    local mimetype
+    mimetype=$(file -bL --mime-type "$filepath")
+
+    case "$mimetype" in
+    image/*)
+      display_image "$filepath"
+      ;;
+    *text* | application/json)
+      bat --style=numbers --color=always "$filepath"
+      ;;
+    *)
+      file "$filepath" | fold -sw "$FZF_PREVIEW_COLUMNS"
+      ;;
+    esac
+  fi
+}
+
+# --- Script Entry Point and Mode Switching ---
+
+if [ "$1" = "--preview" ]; then
+  # PREVIEW MODE: Called by fzf to show a file preview.
+  # Shift to get the actual filename (which may contain spaces)
+  shift
+  # All remaining arguments form the filename
+  filepath="$*"
+  
+  # Check if we need to prepend the base path
+  if [ -n "$FZF_PREVIEW_BASE_PATH" ]; then
+    fzf_preview_main "$FZF_PREVIEW_BASE_PATH/$filepath"
+  else
+    fzf_preview_main "$filepath"
+  fi
+else
+  # INTERACTIVE MODE: Called by the user.
+
+  # Setup a general trap for temporary file cleanup.
+  trap 'rm -f /tmp/fzf_latex_preview_$$*.{tex,pdf,log,aux,png,svg}' EXIT HUP INT QUIT TERM
+
+  # --- Main Logic: Check for a path argument ---
+  if [ -z "$1" ]; then
+    # **CASE 1: No arguments provided.**
+    # Search the current directory. No path manipulation is needed.
+    # Use bash -c to handle spaces properly
+    FZF_DEFAULT_COMMAND="fd . --type f" fzf --reverse --preview "bash -c '$0 --preview \"\$@\"' -- {}"
+
+  else
+    # **CASE 2: A path argument is provided.**
+    # NOTE: Variables are declared without `local` as we are not in a function.
+    base_path="$1"
+    if ! [ -d "$base_path" ]; then
+      echo "Error: Directory '$base_path' not found." >&2
+      exit 1
+    fi
+
+    # Export the base path so the preview command can access it
+    export FZF_PREVIEW_BASE_PATH="$base_path"
+    
+    # Run `fd` within the specified `base_path` and pipe results to `fzf`.
+    # Use bash -c to handle spaces properly
+    selection=$((cd "$base_path" && fd . --type f) | fzf --reverse --preview "bash -c '$0 --preview \"\$@\"' -- {}")
+
+    # Clear the environment variable after use
+    unset FZF_PREVIEW_BASE_PATH
+
+    # If a file was selected, prepend the base path to the result and print it.
+    if [ -n "$selection" ]; then
+      clean_base_path="${base_path%/}"
+      echo "$clean_base_path/$selection"
+    fi
+  fi
+fi
