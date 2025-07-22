@@ -1,0 +1,3 @@
+[submodule "ext/MicroTeX"]
+	path = ext/MicroTeX
+	url = https://github.com/gusaud3051/MicroTeX-mm4
